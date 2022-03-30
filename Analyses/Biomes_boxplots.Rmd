@@ -1,0 +1,92 @@
+---
+title: "Probar"
+author: "FULL_CODE_NEW"
+date: "17/02/2021"
+output: html_document
+---
+
+```{r}
+train_data %>% 
+  subset(train_data$Dominant=="GRAM") -> aux1
+
+train_data %>% 
+  group_by(taxon_name) %>% 
+  summarise_at(vars(taxon_percent),              # Specify column
+               list(mean = mean)) %>%       # Specify function
+  top_n(12, wt=mean) %>% 
+  ungroup() %>% 
+  dplyr::select(taxon_name) %>%
+  distinct() %>% 
+  inner_join(aux1) %>% 
+  ggplot(aes(x=reorder(taxon_name, -taxon_percent), y=taxon_percent)) +
+  geom_boxplot(outlier.alpha = 0.25)+
+  expand_limits(y = c(0, 100))+
+  scale_y_continuous(breaks=seq(0, 100, 20))+
+  annotate(geom = 'text', x = 11.5, y = 95, label = "GRAM", size=4)+
+  labs(x="", y="Abundance (%)", title = "a")+
+  theme(axis.text.x = element_text(face = "italic",size=14, angle = 90, hjust = 1, vjust = 0.3),
+        axis.text.y = element_text(size=12),
+        axis.title.x = element_text(size=14),
+        axis.title.y = element_text(size=14, angle=90),
+        plot.caption = element_text(size=14,hjust = 0, face = "bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA))->gram
+
+gram
+
+ggsave("/My Drive/Github_esme/Within_variability_technique/Output/Biomes_boxplots/GRAM_EC4c_SHORT.tiff", plot = last_plot(), width = 6, height = 5, dpi = 600)
+
+```
+
+
+
+```{r}
+# folder where you want the graphs to be saved:
+results <- "/My Drive/Github_esme/Within_variability_technique/Output/Biomes_boxplots/"  
+
+
+  # create list of counties in data to loop over 
+  biome_list <- unique(train_data$Dominant)
+  
+  
+  # create for loop to produce ggplot2 graphs 
+  for (i in seq_along(biome_list)) { 
+    
+  aux1<-train_data %>% 
+        subset(train_data$Dominant==biome_list[i])
+      
+ plot<-train_data %>% 
+        subset(train_data$Dominant==biome_list[i]) %>% 
+  group_by(taxon_name) %>% 
+  summarise_at(vars(taxon_percent),              # Specify column
+               list(mean = mean)) %>%       # Specify function
+  top_n(25, wt=mean) %>% 
+  ungroup() %>% 
+  dplyr::select(taxon_name) %>%
+  distinct() %>% 
+  inner_join(aux1) %>% 
+  ggplot(aes(x=reorder(taxon_name, -taxon_percent), y=taxon_percent)) +
+  geom_boxplot(outlier.alpha = 0.25)+
+  expand_limits(y = c(0, 100))+
+  scale_y_continuous(breaks=seq(0, 100, 20))+
+  labs(x="Taxon", y="Abundance (%)", title = biome_list[i])+
+  theme(axis.text.x = element_text(face = "italic",size=11,angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.y = element_text(size=11),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=11, angle=90),
+        plot.caption = element_text(size=12,hjust = 0, face = "bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA))
+
+    ggsave(plot, file=paste(results, 
+                           biome_list[i], "_EC4c.tiff", sep=''),scale = 1, dpi = 600)
+    
+    print(plot)
+  }
+#}
+```
+
