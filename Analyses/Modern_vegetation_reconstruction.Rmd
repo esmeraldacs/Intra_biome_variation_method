@@ -1,0 +1,604 @@
+---
+title: "Training and testing datasets"
+author: "Esmeralda Cruz-Silva"
+date: "01/04/2021"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+*Chunk 1*
+```{r}
+#library(tidyverse)
+```
+
+#Importing data
+
+The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
+
+Importing pollen percentages
+*Chunk 2*
+```{r}
+#   Modify path to the data
+polen_path <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Input/Modern_fossil_pollen_percentages/"
+polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
+polen_file <- paste(polen_path, polen_name, sep="")
+polen <- read.csv(polen_file) 
+
+str(polen)
+```
+
+
+
+Importing observed biome by using an particular search window
+*Chunk 3*
+```{r}
+#   Modify path to the data
+pnv_path <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Input/Extract_PNV_biome/"
+pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
+pnv_file <- paste(pnv_path, pnv_name, sep="")
+pnv_obs <- read.csv(pnv_file) 
+
+pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
+
+str(pnv_obs)
+```
+
+
+#Setting some traits
+*Chunk 4*
+```{r}
+#Set path to output files
+path_to_results <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Output/Comparison_matrices_and_metrics/"
+
+#Set prefix name of the iteration
+iteration <- "EC4c_f_ep0.5"
+
+#Set proportion of the data to be used as training dataset (0.75 for a training/testing ratio of 75:25)
+SampFrac <- 0.7
+
+#Set value for epsilon
+EpsVal<- 0.5
+```
+
+#Filtering the data
+  For each pollen sample, join the percentages of pollen with the observed biome in a search window on the PNV map. Keep only one sample for each pollen sample location by random sampling. Discard samples whose observed biome is *NA*. 
+*Chunk 5*
+```{r}
+polen_wide <- polen %>% 
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0)
+
+polen_wide_o<-pnv_obs %>% 
+  inner_join(polen_wide, by="ID_SAMPLE") #join pollen percentages and observed biome
+
+set.seed(2501)
+ambwide_amg <- polen_wide_o %>%
+  group_by(latitude,longitude) %>% 
+  slice_sample(n=1) %>% #keep only one sample per location
+  ungroup() %>% 
+  subset(!is.na(Dominant)) #Remove samples with NA observed biome
+
+#This is the total number of samples left in each biome
+ambwide_amg %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+```
+
+
+
+Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM by using Themis R package. https://themis.tidymodels.org/
+
+```{r}
+ratio <- ambwide_amg %>% count(Dominant) %>% 
+  mutate(med = median(n)) %>% 
+  pivot_wider(names_from = Dominant, values_from = n) %>% 
+  select(med,GRAM,DESE) %>%
+  #mutate(ratioo = med/COOL) %>% 
+  mutate(ratioo = GRAM/DESE) %>%
+  select(ratioo) %>% as_vector()
+
+#Random downsampling majority classes
+set.seed(2468)
+  recipes::recipe(~., ambwide_amg) %>%
+  themis::step_downsample(Dominant, under_ratio = ratio) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL) -> oversamp
+```
+
+
+Split training and testing data
+```{r}
+train_data <- oversamp %>% 
+  group_by(Dominant) %>% 
+  sample_frac(SampFrac)
+
+train_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+
+test_data <- anti_join(oversamp,train_data)
+
+test_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+```
+
+
+Get the TRAINING data table for the algorithm
+```{r}
+train_data <- train_data %>% 
+   pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") %>% 
+  group_by(Dominant,taxon_name) %>%
+  #filter taxa that only occurs once in each group, since we cannot calculate the standard deviation
+  filter(n()>=2) %>% 
+  ungroup() %>%
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0) %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") #This is the object needed for the box-plots
+
+train_data <- train_data %>% 
+  ungroup() %>% 
+  group_by(Dominant, taxon_name) %>%  # Specify group indicator
+  summarise_at(vars(taxon_percent),list(Mean = mean,
+                                        Stdev = sd)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = Dominant, values_from = c(Mean, Stdev))
+
+#write.csv(train_data,"/My Drive/Github_esme/Within_variability_technique/Input/Training_dataset/BiomeData_EC4c_f.csv",row.names=FALSE)
+```
+
+
+Get the TESTING data table for the algorithm
+```{r}
+test_data <- test_data %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") 
+```
+
+
+
+#Dissimilarity measurement with trainig dataset
+```{r}
+alldata <- full_join(test_data,train_data,by="taxon_name")
+```
+
+
+
+##OBSERVED DOMINANT AND SUBDOMINANT BIOMES
+Get the observed dominant and subdominant biome in Hengl's PNV map for each sample
+```{r}
+#Get observed dominant biome
+obsv_biome1 <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE,Dominant) %>% 
+  distinct() %>% group_by(entity_name)%>%
+  count(Dominant) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,Dominant)
+
+#Get observed subdominant biome
+obsv_biome2 <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE,Subdominant) %>% 
+  distinct() %>% group_by(entity_name)%>%
+  count(Subdominant) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,Subdominant)
+```
+
+
+##PREDICTED BIOME
+
+###Dissimilarity index
+```{r}
+sqsc <- alldata %>% 
+  #Set a value for epsilon
+  mutate(Epsilon=EpsVal)%>% 
+  mutate(TUND_Sqrt=(taxon_percent-Mean_TUND)^2/((Stdev_TUND+Epsilon)^2)) %>% 
+  mutate(DESE_Sqrt=(taxon_percent-Mean_DESE)^2/((Stdev_DESE+Epsilon)^2)) %>% 
+  mutate(GRAM_Sqrt=(taxon_percent-Mean_GRAM)^2/((Stdev_GRAM+Epsilon)^2)) %>% 
+  mutate(XSHB_Sqrt=(taxon_percent-Mean_XSHB)^2/((Stdev_XSHB+Epsilon)^2)) %>% 
+  mutate(CENF_Sqrt=(taxon_percent-Mean_CENF)^2/((Stdev_CENF+Epsilon)^2)) %>% 
+  mutate(TEDE_Sqrt=(taxon_percent-Mean_TEDE)^2/((Stdev_TEDE+Epsilon)^2)) %>% 
+  mutate(CMIX_Sqrt=(taxon_percent-Mean_CMIX)^2/((Stdev_CMIX+Epsilon)^2)) %>% 
+  mutate(ENWD_Sqrt=(taxon_percent-Mean_ENWD)^2/((Stdev_ENWD+Epsilon)^2)) %>% 
+  mutate(WTSFS_Sqrt=(taxon_percent-Mean_WTSFS)^2/((Stdev_WTSFS+Epsilon)^2)) %>% 
+  dplyr::select(ID_SAMPLE,TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt) %>% 
+  group_by(ID_SAMPLE) %>% 
+  summarise(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sum))%>% 
+  mutate(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sqrt)) %>% 
+  ungroup()
+```
+
+
+###Get recirpocal of the scores
+```{r}
+biomes <- sqsc %>% 
+  mutate(TUND=exp(-TUND_Sqrt/100)) %>% 
+  mutate(DESE=exp(-DESE_Sqrt/100)) %>% 
+  mutate(GRAM=exp(-GRAM_Sqrt/100)) %>% 
+  mutate(XSHB=exp(-XSHB_Sqrt/100)) %>% 
+  mutate(ENWD=exp(-ENWD_Sqrt/100)) %>% 
+  mutate(WTSFS=exp(-WTSFS_Sqrt/100)) %>% 
+  mutate(CENF=exp(-CENF_Sqrt/100)) %>% 
+  mutate(CMIX=exp(-CMIX_Sqrt/100)) %>% 
+  mutate(TEDE=exp(-TEDE_Sqrt/100)) %>%  
+  dplyr::select(ID_SAMPLE,TUND,DESE,GRAM,XSHB,ENWD,
+         WTSFS,CENF,CMIX,TEDE)
+```
+
+
+
+###Get the winner biome (highest score)
+```{r}
+sqsc2 <- biomes %>% 
+  mutate(predicted_biome=colnames(biomes [,2:10])[apply(biomes [,2:10], 1, which.max)]) %>% 
+  #mutate(predicted_num=apply(biomes [,2:11], 1, which.max)) %>% 
+  dplyr::select(ID_SAMPLE,predicted_biome)
+```
+
+
+###Get the most common biome in entities with duplicates
+```{r}
+biomes <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE) %>% 
+  distinct() %>% 
+  inner_join(sqsc2, by = "ID_SAMPLE") %>% 
+  group_by(entity_name)%>%
+  count(predicted_biome) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,predicted_biome)
+```
+
+
+###Make a comparison table
+```{r}
+comparison <- biomes %>% 
+  inner_join(obsv_biome1, by="entity_name") %>% 
+  inner_join(obsv_biome2, by= "entity_name") %>% 
+#Obtain a composit matrix
+  mutate(ObsComposit = case_when(Dominant == predicted_biome ~ Dominant,
+                               Subdominant == predicted_biome  ~ Subdominant)) %>% 
+  mutate(ObsComposit = coalesce(ObsComposit,Dominant)) %>% 
+  mutate(PredComposit = case_when(Dominant==predicted_biome ~ predicted_biome,
+                                 Subdominant == predicted_biome ~ predicted_biome)) %>% 
+  mutate(PredComposit = coalesce(PredComposit,predicted_biome))
+```
+
+
+
+##CONFUSION MATRIX
+```{r}
+observed<-ordered(comparison$Dominant,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison$predicted_biome,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_Dominant.csv", sep=''))
+```
+
+
+```{r}
+observed<-ordered(comparison$ObsComposit,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison$PredComposit,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_Composit.csv", sep=''))
+```
+
+
+
+
+```{r}
+comparison2 <- comparison %>% 
+  subset(!is.na(Subdominant))
+
+observed<-ordered(comparison2$Subdominant,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison2$predicted_biome,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+#zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+#rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_Subdominant.csv", sep=''))
+```
+
+
+
+
+```{r}
+comparison$predicted_biome<-as.factor(comparison$predicted_biome)
+comparison$Dominant<-as.factor(comparison$Dominant)
+
+comparison$PredComposit<-as.factor(comparison$PredComposit)
+comparison$ObsComposit<-as.factor(comparison$ObsComposit)
+```
+
+
+Metrics calculated from the comparison matrix
+```{r}
+#Calculation of accuaracy
+mlr3measures::acc(comparison$Dominant, comparison$predicted_biome) -> acc1
+mlr3measures::acc(comparison$ObsComposit, comparison$PredComposit) -> acc2
+
+
+#Calculation of balanced accuracy for a multiclass categorization (Average of recalls)
+mlr3measures::bacc(comparison$Dominant, comparison$predicted_biome) -> bacc1
+mlr3measures::bacc(comparison$ObsComposit, comparison$PredComposit) -> bacc2
+
+
+#Create a tiny dataframe of the balance and balanced accuracy of both
+metrics <- data.frame(TestData= c("WholeRegion","WholeRegion"),
+                      IterEval=c("Dominant","Composit"),
+                      Accuracy=c((acc1*100),(acc2*100)),
+                      Balanced_accuracy=c((bacc1*100),(bacc2*100)))
+
+metrics
+
+#write.csv(metrics, file=paste("./Comparison matrices/EC4c_eps0.5/",iteration,"_Metrics.csv",sep=''))
+```
+_________________________________________________________
+_________________________________________________________
+#Testing on the EMBSECBIO region
+
+From here onwards we are going to test how well our training dataset is able to predict the vegetation of the embedment region, using modern pollen samples from this region as a testing dataset. This is because our final target is to reconstruct the vegetation inthe EMBSECBIO area during the Holocene.
+_________________________________________________________
+_________________________________________________________
+
+
+ We are going to use the filtered data produced at the *Chunk 5*.
+```{r}
+amblong <- ambwide_amg %>% 
+  pivot_longer(!c(entity_name,Dominant,Subdominant,ID_SAMPLE,latitude,longitude), names_to = "taxon_name", values_to = "taxon_percent") #long format
+
+
+#Get the TESTING data table from the EMBSECBIO region
+emb_test_data <- amblong %>% 
+  subset(latitude>28.00000) %>% 
+  subset(latitude<49.25000) %>% 
+  subset(longitude>20.00000) %>% 
+  subset(longitude<62.00000) %>% 
+  distinct()
+```
+
+
+
+# Modern biomes reconstruction using the created training and testing data
+```{r}
+alldata <- full_join(emb_test_data,train_data,by="taxon_name")
+```
+
+
+
+##OBSERVED DOMINANT AND SUBDOMINANT BIOMES
+Get the observed dominant and subdominant biome in Hengl's PNV map for each sample
+```{r}
+#Get observed dominant biome
+obsv_biome1 <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE,Dominant) %>% 
+  distinct() %>% group_by(entity_name)%>%
+  count(Dominant) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,Dominant)
+
+#Get observed subdominant biome
+obsv_biome2 <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE,Subdominant) %>% 
+  distinct() %>% group_by(entity_name)%>%
+  count(Subdominant) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,Subdominant)
+```
+
+
+###Dissimilarity index
+```{r}
+sqsc <- alldata %>% 
+  #Set a value for epsilon
+  mutate(Epsilon=EpsVal)%>% 
+  mutate(TUND_Sqrt=(taxon_percent-Mean_TUND)^2/((Stdev_TUND+Epsilon)^2)) %>% 
+  mutate(DESE_Sqrt=(taxon_percent-Mean_DESE)^2/((Stdev_DESE+Epsilon)^2)) %>% 
+  mutate(GRAM_Sqrt=(taxon_percent-Mean_GRAM)^2/((Stdev_GRAM+Epsilon)^2)) %>% 
+  mutate(XSHB_Sqrt=(taxon_percent-Mean_XSHB)^2/((Stdev_XSHB+Epsilon)^2)) %>% 
+  mutate(CENF_Sqrt=(taxon_percent-Mean_CENF)^2/((Stdev_CENF+Epsilon)^2)) %>% 
+  mutate(TEDE_Sqrt=(taxon_percent-Mean_TEDE)^2/((Stdev_TEDE+Epsilon)^2)) %>% 
+  mutate(CMIX_Sqrt=(taxon_percent-Mean_CMIX)^2/((Stdev_CMIX+Epsilon)^2)) %>% 
+  mutate(ENWD_Sqrt=(taxon_percent-Mean_ENWD)^2/((Stdev_ENWD+Epsilon)^2)) %>% 
+  mutate(WTSFS_Sqrt=(taxon_percent-Mean_WTSFS)^2/((Stdev_WTSFS+Epsilon)^2)) %>% 
+  dplyr::select(ID_SAMPLE,TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt) %>% 
+  group_by(ID_SAMPLE) %>% 
+  summarise(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sum))%>% 
+  mutate(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sqrt)) %>% 
+  ungroup()
+```
+
+
+###Get recirpocal of the scores and normalization
+```{r}
+biomes <- sqsc %>% 
+  mutate(TUND=exp(-TUND_Sqrt/100)) %>% 
+  mutate(DESE=exp(-DESE_Sqrt/100)) %>% 
+  mutate(GRAM=exp(-GRAM_Sqrt/100)) %>% 
+  mutate(XSHB=exp(-XSHB_Sqrt/100)) %>% 
+  mutate(ENWD=exp(-ENWD_Sqrt/100)) %>% 
+  mutate(WTSFS=exp(-WTSFS_Sqrt/100)) %>% 
+  mutate(CENF=exp(-CENF_Sqrt/100)) %>% 
+  mutate(CMIX=exp(-CMIX_Sqrt/100)) %>% 
+  mutate(TEDE=exp(-TEDE_Sqrt/100)) %>%  
+  dplyr::select(ID_SAMPLE,TUND,DESE,GRAM,XSHB,ENWD,
+         WTSFS,CENF,CMIX,TEDE)
+
+#(alldata,"/Users/Esmesaurio/Desktop/Benja3.csv")
+```
+
+
+
+###Get the winner biome (highest score)
+```{r}
+sqsc2 <- biomes %>% 
+  mutate(predicted_biome=colnames(biomes [,2:10])[apply(biomes [,2:10], 1, which.max)]) %>% 
+  #mutate(predicted_num=apply(biomes [,2:11], 1, which.max)) %>% 
+  dplyr::select(ID_SAMPLE,predicted_biome)
+```
+
+
+###Get the most common biome in entities with duplicates
+```{r}
+biomes <- alldata %>% 
+  filter(!is.na(ID_SAMPLE)) %>%
+  dplyr::select(entity_name,ID_SAMPLE) %>% 
+  distinct() %>% 
+  inner_join(sqsc2, by = "ID_SAMPLE") %>% 
+  group_by(entity_name)%>%
+  count(predicted_biome) %>% 
+  slice(which.max(n)) %>% 
+  ungroup() %>% 
+  dplyr::select(entity_name,predicted_biome)
+```
+
+
+###Make a comparison table
+```{r}
+comparison <- biomes %>% 
+  inner_join(obsv_biome1, by="entity_name") %>% 
+  inner_join(obsv_biome2, by= "entity_name") %>% 
+#Obtain a composit matrix
+  mutate(ObsComposit = case_when(Dominant == predicted_biome ~ Dominant,
+                               Subdominant == predicted_biome  ~ Subdominant)) %>% 
+  mutate(ObsComposit = coalesce(ObsComposit,Dominant)) %>% 
+  mutate(PredComposit = case_when(Dominant==predicted_biome ~ predicted_biome,
+                                 Subdominant == predicted_biome ~ predicted_biome)) %>% 
+  mutate(PredComposit = coalesce(PredComposit,predicted_biome))
+```
+
+
+
+##CONFUSION MATRIX
+```{r}
+observed<-ordered(comparison$Dominant,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison$predicted_biome,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_EMB_Dominant.csv", sep=''))
+```
+
+
+```{r}
+observed<-ordered(comparison$ObsComposit,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison$PredComposit,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_EMB_Composit.csv", sep=''))
+```
+
+
+```{r}
+comparison2 <- comparison %>% 
+  subset(!is.na(Subdominant))
+
+observed<-ordered(comparison2$Subdominant,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+predicted<-ordered(comparison2$predicted_biome,levels=c("DESE","XSHB","WTSFS","GRAM","ENWD","TEDE","CMIX","CENF","TUND"))
+
+zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
+#zatab
+  
+rzatab<-round(prop.table(zatab,1)*100)
+#rzatab
+
+write.csv(zatab, file=paste(path_to_results,iteration, "_EMB_Subdominant.csv", sep=''))
+```
+
+
+
+
+```{r}
+comparison %>% 
+  filter(!predicted_biome%in%c("TUND","CENF")) %>% 
+  filter(!Dominant%in%c("TUND","CENF"))->comparison
+
+
+comparison$predicted_biome<-as.factor(comparison$predicted_biome)
+comparison$Dominant<-as.factor(comparison$Dominant)
+
+comparison$PredComposit<-as.factor(comparison$PredComposit)
+comparison$ObsComposit<-as.factor(comparison$ObsComposit)
+```
+
+
+Metrics calculated from the comparison matrix
+```{r}
+#Calculation of accuaracy
+mlr3measures::acc(comparison$Dominant, comparison$predicted_biome) -> acc1
+mlr3measures::acc(comparison$ObsComposit, comparison$PredComposit) -> acc2
+
+
+#Calculation of balanced accuracy for a multiclass categorization (Average of recalls)
+mlr3measures::bacc(comparison$Dominant, comparison$predicted_biome) -> bacc1
+mlr3measures::bacc(comparison$ObsComposit, comparison$PredComposit) -> bacc2
+
+
+#Create a tiny dataframe of the balance and balanced accuracy of both
+metrics2 <- data.frame(TestData= c("EMBSE","EMBSE"),
+                       IterEval=c("Dominant","Composit"),
+                       Accuracy=c((acc1*100),(acc2*100)),
+                       Balanced_accuracy=c((bacc1*100),(bacc2*100)))
+```
+
+
+
+```{r}
+metrics_final <- bind_rows(metrics,metrics2)
+
+metrics_final
+
+write.csv(metrics_final, file=paste(path_to_results,iteration, "_Metrics.csv", sep=''))
+```
+

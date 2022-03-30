@@ -1,0 +1,5 @@
+"","TestData","IterEval","Accuracy","Balanced_accuracy"
+"1","WholeRegion","Dominant",65.7534246575342,65.8819021861618
+"2","WholeRegion","Composit",75.6849315068493,75.5848297651535
+"3","EMBSE","Dominant",62.2950819672131,64.2197942775417
+"4","EMBSE","Composit",74.207650273224,77.3391474453267
