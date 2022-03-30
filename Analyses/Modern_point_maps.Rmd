@@ -1,0 +1,469 @@
+---
+title: "PROB_DOWNCORE"
+author: "FULL_CODE_NEW"
+date: "02/12/2020"
+output: html_document
+---
+
+#Importing data
+
+The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
+
+Importing pollen percentages
+*Chunk 2*
+```{r}
+#   Modify path to the data
+polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
+polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
+polen_file <- paste(polen_path, polen_name, sep="")
+polen <- read.csv(polen_file) 
+
+str(polen)
+```
+
+
+
+Importing observed biome by using an particular search window
+*Chunk 3*
+```{r}
+#   Modify path to the data
+pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
+pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
+pnv_file <- paste(pnv_path, pnv_name, sep="")
+pnv_obs <- read.csv(pnv_file) 
+
+pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
+
+str(pnv_obs)
+```
+
+
+#Setting some traits
+*Chunk 4*
+```{r}
+#Set prefix name of the iteration
+iteration <- "EC4c_f_ep0.5"
+
+#Set proportion of the data to be used as training dataset (0.75 for a training/testing ratio of 75:25)
+SampFrac <- 0.7
+
+#Set value for epsilon
+EpsVal<- 0.5
+```
+#Filtering the data
+  For each pollen sample, join the percentages of pollen with the observed biome in a search window on the PNV map. Keep only one sample for each pollen sample location by random sampling. Discard samples whose observed biome is *NA*. 
+*Chunk 5*
+```{r}
+polen_wide <- polen %>% 
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0)
+
+polen_wide_o<-pnv_obs %>% 
+  inner_join(polen_wide, by="ID_SAMPLE") #join pollen percentages and observed biome
+
+set.seed(2501)
+ambwide_amg <- polen_wide_o %>%
+  group_by(latitude,longitude) %>% 
+  slice_sample(n=1) %>% #keep only one sample per location
+  ungroup() %>% 
+  subset(!is.na(Dominant)) #Remove samples with NA observed biome
+```
+
+
+Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM
+```{r}
+ratio <- ambwide_amg %>% count(Dominant) %>% 
+  mutate(med = median(n)) %>% 
+  pivot_wider(names_from = Dominant, values_from = n) %>% 
+  select(med,GRAM,DESE) %>%
+  #mutate(ratioo = med/COOL) %>% 
+  mutate(ratioo = GRAM/DESE) %>%
+  select(ratioo) %>% as_vector()
+
+#Random downsampling majority classes
+set.seed(2468)
+  recipes::recipe(~., ambwide_amg) %>%
+  themis::step_downsample(Dominant, under_ratio = ratio) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL) -> oversamp
+
+
+#Split training data
+train_data <- oversamp %>% 
+  group_by(Dominant) %>% 
+  sample_frac(SampFrac)
+```
+
+
+Get the TRAINING data table for the algorithm
+```{r}
+train_data <- train_data %>% 
+   pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") %>% 
+  group_by(Dominant,taxon_name) %>%
+  #filter taxa that only occurs once in each group, since we cannot calculate the standard deviation
+  filter(n()>=2) %>% 
+  ungroup() %>%
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0) %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") #This is the object needed for the box-plots
+
+train_data <- train_data %>% 
+  ungroup() %>% 
+  group_by(Dominant, taxon_name) %>%  # Specify group indicator
+  summarise_at(vars(taxon_percent),list(Mean = mean,
+                                        Stdev = sd)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = Dominant, values_from = c(Mean, Stdev))
+```
+
+
+```{r}
+#Keep only the obtained train data
+rm(list = setdiff(ls(),"train_data"))
+
+
+DowncoreData <- read.csv("/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/SampleData_DOWNCORE_June2021.csv",header=TRUE,sep=",")
+
+#Keep only modern samples
+DowncoreData <- DowncoreData %>% subset(age<=150)
+
+
+#Create a table AllData
+alldata <- full_join(DowncoreData, train_data,by="taxon_name")
+str(alldata)
+```
+
+
+##PREDICTED BIOME
+Prepare the data
+```{r}
+alldata <- alldata %>% 
+  ##Remove taxa that are in the training set, but do not appear in the downcore data of the EMBSECBIO region
+  filter(!is.na(ID_SAMPLE)) %>% 
+  subset(!is.na(Mean_CENF)) #Remove taxa that are in the testing set, but not in the training set.
+```
+
+
+###Dissimilarity index
+```{r}
+sqsc <- alldata %>% 
+  mutate(Epsilon=0.5)%>% #Set a value for epsilon
+  mutate(TUND_Sqrt=(taxon_percent-Mean_TUND)^2/((Stdev_TUND+Epsilon)^2)) %>% 
+  mutate(DESE_Sqrt=(taxon_percent-Mean_DESE)^2/((Stdev_DESE+Epsilon)^2)) %>% 
+  mutate(GRAM_Sqrt=(taxon_percent-Mean_GRAM)^2/((Stdev_GRAM+Epsilon)^2)) %>% 
+  mutate(XSHB_Sqrt=(taxon_percent-Mean_XSHB)^2/((Stdev_XSHB+Epsilon)^2)) %>% 
+  mutate(CENF_Sqrt=(taxon_percent-Mean_CENF)^2/((Stdev_CENF+Epsilon)^2)) %>% 
+  mutate(TEDE_Sqrt=(taxon_percent-Mean_TEDE)^2/((Stdev_TEDE+Epsilon)^2)) %>% 
+  mutate(CMIX_Sqrt=(taxon_percent-Mean_CMIX)^2/((Stdev_CMIX+Epsilon)^2)) %>% 
+  mutate(ENWD_Sqrt=(taxon_percent-Mean_ENWD)^2/((Stdev_ENWD+Epsilon)^2)) %>% 
+  mutate(WTSFS_Sqrt=(taxon_percent-Mean_WTSFS)^2/((Stdev_WTSFS+Epsilon)^2)) %>% 
+  dplyr::select(ID_SAMPLE,age,TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt) %>% 
+  group_by(ID_SAMPLE,age) %>% 
+  summarise(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sum))%>% 
+  mutate(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sqrt)) %>% 
+  ungroup()
+```
+
+
+###Get recirpocal of the scores and normalization
+```{r}
+biomes <- sqsc %>% 
+  mutate(TUND=exp(-TUND_Sqrt/100)) %>% 
+  mutate(DESE=exp(-DESE_Sqrt/100)) %>% 
+  mutate(GRAM=exp(-GRAM_Sqrt/100)) %>% 
+  mutate(XSHB=exp(-XSHB_Sqrt/100)) %>% 
+  mutate(ENWD=exp(-ENWD_Sqrt/100)) %>% 
+  mutate(WTSFS=exp(-WTSFS_Sqrt/100)) %>% 
+  mutate(CENF=exp(-CENF_Sqrt/100)) %>% 
+  mutate(CMIX=exp(-CMIX_Sqrt/100)) %>% 
+  mutate(TEDE=exp(-TEDE_Sqrt/100)) %>%   
+  dplyr::select(ID_SAMPLE,age,TUND,DESE,GRAM,XSHB,ENWD,
+         WTSFS,CENF,CMIX,TEDE)
+```
+
+
+
+For maps
+```{r}
+alldatafjoin <- alldata %>% 
+  dplyr::select(entity_name,latitude,longitude,ID_SAMPLE) %>% 
+  distinct()
+
+biomes_maps <- biomes %>% 
+  mutate(predicted_biome=colnames(biomes [,3:11])[apply(biomes [,3:11], 1, which.max)]) %>% 
+  mutate(predicted_score=apply(biomes [,3:11], 1, max)) %>% 
+  dplyr::select(ID_SAMPLE,age,predicted_biome, predicted_score) %>% 
+  inner_join(alldatafjoin, by="ID_SAMPLE")
+```
+
+
+```{r}
+colores<- c("XSHB"="#E6706E","GRAM"="#FAD272","DESE"="#F7FFCA","ENWD"="#E0E376","WTSFS"="#8FB83E","COOL"="#BBA6D0","CENF"="#6B2F85","XSHB"="#E6706E","TEDE"="#005B89","CMIX"="#28B8C8","TUND"="#B03E8D","CDFO"="#BBA6D0")
+```
+
+
+
+```{r}
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+#class(world)
+#land<-raster::shapefile("/Users/Esmesaurio/OneDrive - University of Reading/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/ne_50m_land/ne_50m_land.shp")
+
+ocean<- raster::shapefile("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/ne_50m_ocean/ne_50m_ocean.shp")
+
+elevation<- raster::raster("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/MSR_50M_manual_elevation/MSR_50M/MSR_50M.tif")
+
+#  Define your own domine:
+quicksubset <- function(x, longlat){
+# longlat should be a vector of four values: c(xmin, xmax, ymin, ymax)
+  x@data$id <- rownames(x@data)
+  xf = fortify(x, region="id")
+  xjoin = plyr::join(xf, x@data, by="id")
+  xsubset <- subset(xjoin, xjoin$long > longlat[1] & xjoin$long < longlat[2] &
+                           xjoin$lat > longlat[3] & xjoin$lat < longlat[4])
+  xsubset
+}
+ 
+#ylim = c(28.05317,49.2431), xlim = c(19.54792, 62.44992)
+domain <- c(19.54792, 63, 28.05317,49.2431)
+#landsubset <- quicksubset(land, domain)
+ 
+natelevation <- raster::crop(elevation, y=raster::extent(domain))
+
+#rast_table <- data.frame(xyFromCell(natelevation, 1:ncell(natelevation)),
+                         #getValues(natelevation/255))
+
+raster::ratify(natelevation) %>% 
+  #convert the raster to points for plotting
+  raster::rasterToPoints() %>% 
+  #Make the points a dataframe for ggplot
+  data.frame()->natelevation
+
+#Make appropriate column headings
+colnames(natelevation) <- c("Longitude", "Latitude", "elevation")
+```
+
+
+
+```{r}
+#coord_sf(ylim = c(40.3,43.65), xlim = c(39.2, 46.5), expand = FALSE)+
+
+plot_b <- ggplot(data = world) +
+  #geom_sf(col="black",fill="transparent") + #Using if we want political borders
+  coord_sf(ylim = c(28.05317, 49.2431), xlim = c(19.88,62), expand = FALSE) +
+  #coord_sf(ylim = c(28.05317,49.2431), xlim = c(19.54792, 63), expand = FALSE)+
+  geom_raster(data=natelevation, aes(y=Latitude, x=Longitude, fill=elevation), show.legend = F)+
+  scale_fill_gradientn(colours = c("#6c8396", "#fcfcfc"))+ #f8f8f8 en lugar de fcfcfc  
+  geom_polygon(data = ocean, aes(x=long, y=lat, group=group), fill= "white")+#E2F1FC '#E2F1FC'
+  geom_point(data = biomes_maps, mapping = aes(x = longitude, y = latitude, colour=predicted_biome, size=predicted_score), alpha=1)+
+      scale_size(limits = c(0.925,0.999),range = c(0.0001,2.5),breaks = c(0.94,0.96,0.98)) + #or: c(0.1,5)
+      #scale_size(limits = c(min(slig$predicted_score),max(slig$predicted_score)),range = c(1,5),breaks = c(0.1,0.3))+ #or: c(0.1,5)
+      scale_color_manual(values = colores)+
+  geom_rect(xmin = 39.2, xmax = 46.5,   ymin = 40.3, ymax = 43.65,  color="black", fill = "transparent", linetype="dashed", size=0.15) +
+  annotate(geom = "text", x = 34.25, y = 43.25, label = "Black Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 28, y = 33.5, label = "Mediterranean Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 50.3, y = 42.5, label = "Caspian", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 50.65, y = 41.2, label = "Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  labs(x = "Longitude", y = "Latitude", subtitle = "(b)") +
+  guides(color = FALSE) +
+  theme(plot.subtitle= element_text(size=8, face="bold", color="black"),
+        axis.title.x = element_blank(),
+        #axis.title.x = element_text(size=8,color = "black"),
+        axis.title.y = element_blank(),
+        #axis.title.y = element_text(size=8, angle=90),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        panel.grid.major = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA),
+        legend.position = c(0.945, 0.095),
+        legend.background = element_blank(),
+        legend.key.width = unit(0.25,"cm"),
+        legend.key.height = unit(0.25,"cm"),
+        legend.key = element_rect(fill="transparent",color = "transparent"),
+        legend.text = element_text(size=6),
+        legend.title = element_blank(),
+        legend.spacing.x = unit(0, 'cm'),
+        legend.spacing.y = unit(0,"cm"))
+
+plot_b
+
+#ggsave(file="C:/Users/esmer/UoR/PhD/PAPER_RESUBMISION_3RD/Paper_figure_Modern_point_maps_plot/modern_map_points.pdf", plot = last_plot(), units = "cm", height = 6.021, width = 12, dpi = 85)
+```
+
+
+
+```{r}
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+#class(world)
+#land<-raster::shapefile("/Users/Esmesaurio/OneDrive - University of Reading/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/ne_50m_land/ne_50m_land.shp")
+
+ocean<- raster::shapefile("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/ne_50m_ocean/ne_50m_ocean.shp")
+
+elevation<- raster::raster("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Large_scale/Elevation_GRAY_HR_SR/GRAY_HR_SR.tif")
+
+#  Define your own domine:
+quicksubset <- function(x, longlat){
+# longlat should be a vector of four values: c(xmin, xmax, ymin, ymax)
+  x@data$id <- rownames(x@data)
+  xf = fortify(x, region="id")
+  xjoin = plyr::join(xf, x@data, by="id")
+  xsubset <- subset(xjoin, xjoin$long > longlat[1] & xjoin$long < longlat[2] &
+                           xjoin$lat > longlat[3] & xjoin$lat < longlat[4])
+  xsubset
+}
+ 
+#ylim = c(28.05317,49.2431), xlim = c(19.54792, 62.44992)
+domain <- c(19.54792, 64, 28.05317,49.2431)
+#landsubset <- quicksubset(land, domain)
+ 
+natelevation <- raster::crop(elevation, y=raster::extent(domain))
+
+#rast_table <- data.frame(xyFromCell(natelevation, 1:ncell(natelevation)),
+                         #getValues(natelevation/255))
+
+raster::ratify(natelevation) %>% 
+  #convert the raster to points for plotting
+  raster::rasterToPoints() %>% 
+  #Make the points a dataframe for ggplot
+  data.frame()->natelevation
+
+#Make appropriate column headings
+colnames(natelevation) <- c("Longitude", "Latitude", "elevation")
+```
+
+
+
+```{r}
+#coord_sf(ylim = c(40.3,43.65), xlim = c(39.2, 46.5), expand = FALSE)+
+
+plot_c <- ggplot(data = world) +
+  #geom_sf(col="black",fill="transparent") + #Using if we want political borders
+  coord_sf(ylim = c(40.3,43.65), xlim = c(39.2, 46.5), expand = FALSE)+
+  geom_raster(data=natelevation, aes(y=Latitude, x=Longitude, fill=elevation), show.legend = F)+
+  scale_x_continuous(breaks = c(40,42,44,46)) +
+  scale_y_continuous(breaks = c(41,42,43)) +
+  scale_fill_gradientn(colours = c("#6c8396", "#fcfcfc"))+ #f8f8f8 en lugar de fcfcfc
+  geom_polygon(data = ocean, aes(x=long, y=lat, group=group), fill= "white")+#E2F1FC '#E2F1FC'
+  geom_point(data = biomes_maps, mapping = aes(x = longitude, y = latitude, colour=predicted_biome, size=predicted_score), alpha=1)+
+      scale_size(limits = c(0.91,0.999),range = c(0.01,4),breaks = c(0.94,0.96,0.98)) + #or: c(0.1,5)
+      scale_color_manual(values = colores)+
+  labs(x = "Longitude", y = "Latitude", subtitle = "(c)") +
+  guides(color = FALSE) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        panel.grid.major = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA),
+        legend.position = c(0.94, 0.085),
+        legend.background = element_blank(),
+        legend.key.width = unit(0.25,"cm"),
+        legend.key.height = unit(0.25,"cm"),
+        legend.key = element_rect(fill="transparent",color = "transparent"),
+        legend.text = element_text(size=6),
+        legend.title = element_blank(),
+        legend.spacing.x = unit(0, 'cm'),
+        legend.spacing.y = unit(0,"cm"))
+
+plot_c
+
+#ggsave(file="C:/Users/esmer/UoR/PhD/PAPER_RESUBMISION/Modern_point_maps_plot/modern_map_closeup.pdf", plot = last_plot(), units = "cm", height = 6.021, width = 12, dpi = 85)
+```
+
+
+```{r}
+# read potential natural vegetation data sage_veg30.nc:
+# modify the following path to reflect local files
+vegtype_path <- "E:/UoR Biomisation/NEW_ITERATIONS_JANUARY_2021/RASTERS/netcdf files/"
+vegtype_name <- "EMBSECBIO_5km_RasterToNetCDF.nc" #the map in the paper was constructed by using the twoPointFivekm file
+vegtype_file <- paste(vegtype_path, vegtype_name, sep="")
+vegtype <- raster::raster(vegtype_file, varname="biome_type")
+
+#plot(vegtype)
+```
+
+
+```{r}
+#rm(list=ls()) #clear workspace
+#Ratify values as categorical
+raster::ratify(vegtype) %>% 
+  raster::rasterToPoints() %>% #convert the raster to points for plotting
+  data.frame()->df #Make the points a dataframe for ggplot
+
+colnames(df) <- c("Longitude", "Latitude", "biome_type") #Make appropriate column headings
+
+df %>% filter(Longitude<63)->df
+
+df$biome_type[df$biome_type==8]<-9 #Amalgamating types of COOL
+
+df$biome_type[df$biome_type==16] <- 20 #Amalgamating types of TUND
+#df %>% 
+  #dplyr::select(biome_type) %>% 
+  #distinct() %>% 
+  #arrange(biome_type)
+
+#Call in point data, in this case a fake transect (csv file with lat and lon coordinates)
+#sites <- data.frame(read.csv(“/your/path/to/pointfile.csv”))
+```
+
+
+```{r}
+#tundra mas oscuro
+cols<-  c("4"="#8FB83E", "8"="#BBA6D0", "9"="#28B8C8", "13"="#005B89", "14"="#BBA6D0", "15"="#6B2F85","16"="#E6706E","17"="#E0E376", "20"="#E6706E", "22"="#FAD272","27"="#F7FFCA", "28"="#B03E8D")#, "30"="#39c9bb","31"="#39c9bb")
+
+
+nams<- c("20"="XSHB","22"="GRAM","27"="DESE","17"="ENWD","4"="WTSFS","8"="COOL","15"="CENF","16"="XSHB","13"="TEDE","9"="CMIX","28"="TUND","14"="CDFO") #"30"="TUND", "31"="TUND", "14"="CDFO")
+```
+
+
+```{r}
+#Now make the map
+plot_a <- ggplot(data = world) +
+    geom_sf(col="transparent",fill="transparent", size=0.75) +
+    coord_sf(ylim = c(28.05317, 49.2431), xlim = c(19.88,62), expand = FALSE) +
+    #geom_tile(data=df, aes(y=Latitude, x=Longitude, fill=factor(biome_type))) +
+    #scale_fill_manual(values = cols, name="Biome type", labels=nams) +
+    ggspatial::annotation_scale(location = "br", width_hint = 0.080, height = unit(0.18, "cm"), pad_x = unit(0.15, "cm"), pad_y = unit(0.15, "cm")) +
+    ggspatial::annotation_north_arrow(location = "tr", which_north = "true",
+        height = unit(0.40, "cm"),
+        width = unit(0.30, "cm"),
+        pad_x = unit(0.20, "cm"), pad_y = unit(0.20, "cm")) +
+        #style = north_arrow_orienteering) +
+  annotate(geom = "text", x = 34.25, y = 43.25, label = "Black Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 26, y = 34, label = "Mediterranean Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 50.2, y = 42.5, label = "Caspian", fontface = "italic", color = "#666A6A", size = 2) +
+  annotate(geom = "text", x = 50.65, y = 41.3, label = "Sea", fontface = "italic", color = "#666A6A", size = 2) +
+  guides(fill = FALSE) + 
+  labs(x = "Longitude", y = "Latitude", subtitle = "(a)") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        #axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        panel.grid.major = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA),
+        legend.position = c(0.94, 0.085),
+        legend.background = element_blank(),
+        legend.key.width = unit(0.25,"cm"),
+        legend.key.height = unit(0.25,"cm"),
+        legend.key = element_rect(fill="transparent",color = "transparent"),
+        legend.text = element_text(size=6),
+        legend.title = element_blank(),
+        legend.spacing.x = unit(0, 'cm'),
+        legend.spacing.y = unit(0,"cm"))
+  
+  
+plot_a
+
+#ggsave(file="C:/Users/esmer/UoR/PhD/PAPER_RESUBMISION/Modern_point_maps_plot/modern_map_raster_outside.pdf", plot = last_plot(), units = "cm", height = 6.021, width = 12, dpi = 85)
+```
+
+
+
