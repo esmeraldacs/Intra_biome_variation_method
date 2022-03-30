@@ -7,7 +7,7 @@ output: html_document
 
 *Chunk 1*
 ```{r}
-library(cutpointr) #Package for ROC curves
+library(cutpointr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
