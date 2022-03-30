@@ -30,16 +30,22 @@ The **EMBSeCBIO** pollen data base is available through the University of Readin
 
 The **Pontential Natural vegetation map** NetCDF file included in "Data" file of this repository. Originally obtained from https://zenodo.org/record/3631254#.YPbrpOhKibg
 
-## Analysis
+## Analyses
 ### Extract_PNV_observed_biome
 The observed biome in the PNV map for each pollen sample in the modern training data set, was derived using a search window of 20x20 km around the location of the sample point. It was used the Global map of potential natural vegetation (Hengl et al., 2018) in its updated version of spatial resolution of 250m, at a resolution of 1km. We determined both the dominant and subdominant biome in each search window for subsequent evaluation based on which biomes occupied the largest and second-largest number of 1 km2 pixels within the search window. 
-### Biomes_boxplots (to generate figure 3)
+###Modern_vegetation_reconstruction (Tables 2 to 4)
+Modern pollen samples assigned to biomes based on potential natural vegetation data are used to characterize biomes according to the within-biome means and standard deviations of the abundances of each taxon.These are used to calculate a dissimilarity index between any given pollen sample and every biome, and thus assign a pollen sample to the most likely biome. We have applied the new technique to the EMBSeCBIO region in order to compare the performance of the new method with existing reconstructions. The biome reconstructions were evaluated quantitatively using a matrix of predicted versus observed vegetation at each site. We constructed confusion matrices for the evaluation on the test dataset and on the EMBSeCBIO dataset, based on both the dominant and subdominant biome registered in the search window around the sample. 
+###Biomes_boxplots (figure 3 and Supplementary figure )
 The training samples were grouped according to the dominant biome observed in the PNV map. Each modern biome was then characterised by the relative abundance (expressed in terms of the mean, range, and standard deviation) of all taxa present to account for variability in pollen abundances within each biome. 
 Boxes show the median and standard deviation of the abundance of individual taxa.
-### Modern_vegetation_reconstruction (to generate figure 4)
-The reconstructed modern biome distribution was mapped, where each point represents the location of a pollen sample, the colour indicates the reconstructed biome, and the size of the point shows the similarity value.
-### Past_vegetation_reconstruction (to generate figures 5 and 6)
-We calculated the similarity scores between each fossil pollen sample and the target biomes. For mapping purposes, every sample was allocated to the biome with the largest similarity score. We then plotted the typical biome within a 300-year time window, which is close to the average resolution of the fossil pollen records (328 years).  To visualize the changes through time, we produced down-core plots showing the proportion of the similarity score assigned to each sample. 
+###Modern_point_maps (Figure 4)
+The reconstructed modern biome distribution for the EMBSeCBIO region was mapped.
+###Cutpoints_optimal_ROC_identification (Figure 5 and Table 6)
+We used the similarity scores obtained from the modern pollen samples in the modern testing dataset (without downsampling) for each biome (Supplementary figure 3) and made pair-wise comparisons between biomes. We obtained the optimal threshold value that differentiated each pair of biomes by calculating specificity and sensitivity metrics (Supplementary figure 4) and plotting these on a receiver operating characteristic (ROC) curve, where the point with the maximum balance (sensitivity + specificity) was selected as the optimal threshold between the two biomes. 
+
+
+
+ 
 ## References
 
 Harrison, S. P., Marinova, E., & Cruz-Silva, E. (2021). EMBSeCBIO pollen database [Data set]. University of Reading. https://doi.org/10.17864/1947.309
