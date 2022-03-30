@@ -18,10 +18,6 @@
 
 **Main conclusions**: 
 
-### About this repository
-
-This contains codes to perform the modern vegetation reconstructions presented in the paper.
-
 ### Data availability
 
 The **SMPDS** data is available through the University of Reading Data archive at: https://researchdata.reading.ac.uk/194/
