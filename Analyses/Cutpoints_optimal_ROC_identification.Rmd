@@ -1,0 +1,355 @@
+---
+title: "ROC test"
+author: "Esmeralda Cruz-Silva"
+date: "09/03/2022"
+output: html_document
+---
+
+*Chunk 1*
+```{r}
+library(cutpointr) #Package for ROC curves
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+#Importing data
+
+The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
+
+Importing pollen percentages
+*Chunk 2*
+```{r}
+#   Modify path to the data
+polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
+polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
+polen_file <- paste(polen_path, polen_name, sep="")
+polen <- read.csv(polen_file) 
+
+str(polen)
+```
+
+
+
+Importing observed biome by using an particular search window
+*Chunk 3*
+```{r}
+#   Modify path to the data
+pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
+pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
+pnv_file <- paste(pnv_path, pnv_name, sep="")
+pnv_obs <- read.csv(pnv_file) 
+
+pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
+
+str(pnv_obs)
+```
+
+#Setting some traits
+*Chunk 4*
+```{r}
+#Set path to output files
+path_to_results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Cutpoints/"
+
+#Set prefix name of the iteration
+iteration <- "EC4c_f_ep0.5"
+
+#Set proportion of the data to be used as training dataset (0.75 for a training/testing ratio of 75:25)
+SampFrac <- 0.7
+
+#Set value for epsilon
+EpsVal<- 0.5
+```
+
+
+#Filtering the data
+  For each pollen sample, join the percentages of pollen with the observed biome in a search window on the PNV map. Keep only one sample for each pollen sample location by random sampling. Discard samples whose observed biome is *NA*. 
+*Chunk 5*
+```{r}
+polen_wide <- polen %>% 
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0)
+
+polen_wide_o<-pnv_obs %>% 
+  inner_join(polen_wide, by="ID_SAMPLE") #join pollen percentages and observed biome
+
+set.seed(2501)
+ambwide_amg <- polen_wide_o %>%
+  group_by(latitude,longitude) %>% 
+  slice_sample(n=1) %>% #keep only one sample per location
+  ungroup() %>% 
+  subset(!is.na(Dominant)) #Remove samples with NA observed biome
+```
+
+
+
+Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM by using.
+```{r}
+ratio <- ambwide_amg %>% count(Dominant) %>% 
+  mutate(med = median(n)) %>% 
+  pivot_wider(names_from = Dominant, values_from = n) %>% 
+  select(med,GRAM,DESE) %>%
+  #mutate(ratioo = med/COOL) %>% 
+  mutate(ratioo = GRAM/DESE) %>%
+  select(ratioo) %>% 
+  purrr::as_vector()
+
+#Random downsampling majority classes
+set.seed(2468)
+  recipes::recipe(~., ambwide_amg) %>%
+  themis::step_downsample(Dominant, under_ratio = ratio) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL) -> oversamp
+```
+
+
+Split training and testing data
+```{r}
+train_data <- oversamp %>% 
+  group_by(Dominant) %>% 
+  sample_frac(SampFrac)
+
+train_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+
+test_data <- ambwide_amg
+
+test_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+```
+
+
+Get the TRAINING data table for the algorithm
+```{r}
+train_data <- train_data %>% 
+   pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") %>% 
+  group_by(Dominant,taxon_name) %>%
+  #filter taxa that only occurs once in each group, since we cannot calculate the standard deviation
+  filter(n()>=2) %>% 
+  ungroup() %>%
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0) %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") #This is the object needed for the box-plots
+
+train_data <- train_data %>% 
+  ungroup() %>% 
+  group_by(Dominant, taxon_name) %>%  # Specify group indicator
+  summarise_at(vars(taxon_percent),list(Mean = mean,
+                                        Stdev = sd)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = Dominant, values_from = c(Mean, Stdev))
+```
+
+
+Get the TESTING data table for the algorithm
+```{r}
+test_data <- test_data %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") 
+```
+
+
+
+#Dissimilarity measurement with trainig dataset
+```{r}
+alldata <- full_join(test_data,train_data,by="taxon_name")
+```
+
+##PREDICTED BIOME
+
+###Dissimilarity index
+```{r}
+sqsc <- alldata %>% 
+  #Set a value for epsilon
+  mutate(Epsilon=EpsVal)%>% 
+  mutate(TUND_Sqrt=(taxon_percent-Mean_TUND)^2/((Stdev_TUND+Epsilon)^2)) %>% 
+  mutate(DESE_Sqrt=(taxon_percent-Mean_DESE)^2/((Stdev_DESE+Epsilon)^2)) %>% 
+  mutate(GRAM_Sqrt=(taxon_percent-Mean_GRAM)^2/((Stdev_GRAM+Epsilon)^2)) %>% 
+  mutate(XSHB_Sqrt=(taxon_percent-Mean_XSHB)^2/((Stdev_XSHB+Epsilon)^2)) %>% 
+  mutate(CENF_Sqrt=(taxon_percent-Mean_CENF)^2/((Stdev_CENF+Epsilon)^2)) %>% 
+  mutate(TEDE_Sqrt=(taxon_percent-Mean_TEDE)^2/((Stdev_TEDE+Epsilon)^2)) %>% 
+  mutate(CMIX_Sqrt=(taxon_percent-Mean_CMIX)^2/((Stdev_CMIX+Epsilon)^2)) %>% 
+  mutate(ENWD_Sqrt=(taxon_percent-Mean_ENWD)^2/((Stdev_ENWD+Epsilon)^2)) %>% 
+  mutate(WTSFS_Sqrt=(taxon_percent-Mean_WTSFS)^2/((Stdev_WTSFS+Epsilon)^2)) %>% 
+  dplyr::select(ID_SAMPLE,TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt) %>% 
+  group_by(ID_SAMPLE) %>% 
+  summarise(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sum))%>% 
+  mutate(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sqrt)) %>% 
+  ungroup()
+```
+
+
+###Get recirpocal of the scores
+```{r}
+biomes <- sqsc %>% 
+  mutate(TUND=exp(-TUND_Sqrt/100)) %>% 
+  mutate(DESE=exp(-DESE_Sqrt/100)) %>% 
+  mutate(GRAM=exp(-GRAM_Sqrt/100)) %>% 
+  mutate(XSHB=exp(-XSHB_Sqrt/100)) %>% 
+  mutate(ENWD=exp(-ENWD_Sqrt/100)) %>% 
+  mutate(WTSFS=exp(-WTSFS_Sqrt/100)) %>% 
+  mutate(CENF=exp(-CENF_Sqrt/100)) %>% 
+  mutate(CMIX=exp(-CMIX_Sqrt/100)) %>% 
+  mutate(TEDE=exp(-TEDE_Sqrt/100)) %>%  
+  dplyr::select(ID_SAMPLE,TUND,DESE,GRAM,XSHB,ENWD,
+         WTSFS,CENF,CMIX,TEDE)
+```
+
+
+```{r}
+meta <- alldata %>% 
+  select(ID_SAMPLE,Dominant,entity_name,latitude,longitude) %>% 
+  distinct()
+
+similarity <- inner_join(meta,biomes, by = "ID_SAMPLE")
+
+similarity1 <- similarity %>% 
+  pivot_longer(cols = !c(ID_SAMPLE,Dominant,entity_name,latitude,longitude), names_to = "biome", values_to = "simil_score")
+```
+
+Estimation of cutpoints
+https://cran.r-project.org/web/packages/cutpointr/vignettes/cutpointr.html
+```{r}
+biome_list <- unique(similarity$Dominant)
+Cutpoint_optimo_ROC <- data.frame()
+
+
+for (i in seq_along(biome_list)) {
+  for (j in seq_along(biome_list)) {
+    if(biome_list[i]==biome_list[j]) next
+        
+        similarity2 <- similarity1 %>% filter(Dominant == biome_list[i], biome%in%c(biome_list[i],biome_list[j])) 
+    
+        cp <- cutpointr(similarity2, x= simil_score, class= biome, direction = ">=", pos_class = biome_list[i], method = maximize_metric, metric = sum_sens_spec)
+    
+        p.optimo <- as.data.frame(cp$optimal_cutpoint) %>% mutate(biome=biome_list[i], paired_biome=biome_list[j])
+        
+        Cutpoint_optimo_ROC <- bind_rows(p.optimo,Cutpoint_optimo_ROC)
+  
+    #print(Cutpoint_optimo_ROC)
+  }
+}
+
+
+umbrales <- Cutpoint_optimo_ROC %>% 
+  group_by(biome) %>% 
+  slice_min(`cp$optimal_cutpoint`)
+
+
+#File with the cutpoint values for paired comparisons
+write.csv(Cutpoint_optimo_ROC, file = paste0(path_to_results,"Cutpoints_biome_paired_comparison.csv",sep=""), row.names = FALSE)
+#File with a unique cutpoint per biome
+write.csv(umbrales, file = paste0(path_to_results,"/Cutpoints_optimal_one_per_biome.csv",sep=""), row.names = FALSE)
+```
+
+
+```{r}
+colores <- c("XSHB"="#E6706E","GRAM"="#FAD272","DESE"="#F7FFCA","ENWD"="#E0E376","WTSFS"="#8FB83E","COOL"="#BBA6D0","CENF"="#6B2F85","XSHB"="#E6706E","TEDE"="#005B89","CMIX"="#28B8C8","TUND"="#B03E8D")
+```
+
+
+```{r setup, include=FALSE}
+biome_list <- unique(similarity$Dominant) #Usar este si queremos hacer todas las comparaciones por pares
+#biome_list <- c("GRAM","TUND","CMIX","XSHB") #Solo los que queremos comparar para el paper
+Cutpoint_optimo_ROC <- data.frame()
+
+for (i in seq_along(biome_list)) {
+  for (j in seq_along(biome_list)) {
+    if(biome_list[i]==biome_list[j]) next
+
+        similarity2 <- similarity1 %>% filter(Dominant == biome_list[i], biome%in%c(biome_list[i],biome_list[j]))  
+
+        cp <- cutpointr(similarity2, x= simil_score, class= biome, direction = ">=", pos_class = biome_list[i], method = maximize_metric, metric = sum_sens_spec)
+    
+    plot2 <- plot_roc(cp)
+    plot2a <- plot2 +
+            theme_bw() +
+            labs(subtitle = paste("( )",biome_list[i],"-",biome_list[j],sep=" ")) +
+            coord_fixed() +
+            geom_hline(yintercept = cp$sensitivity, linetype = 2, size = 0.4, color = "gray48") +
+            geom_vline(xintercept = 1-cp$specificity, linetype = 2, size = 0.4, color = "gray48") +
+            annotate(geom = "text", label = paste("Optimal cutpoint:", round(cp$optimal_cutpoint, 4),sep=" "), x = (1-cp$specificity)+0.32, y = cp$sensitivity-0.038, size = 3) +
+            annotate(geom = "text", label = paste("AUC:", round(cp$AUC, 4),sep=" "), x = 0.84, y = 0.05, size = 3) +
+            guides(color = FALSE) +
+            theme(plot.title = element_blank(),
+                  plot.subtitle= element_text(size=8, face="bold", color="black"),
+                  #axis.title.x = element_blank(),
+                  axis.title.x = element_text(size=8,color = "black"),
+                  #axis.title.y = element_blank(),
+                  axis.title.y = element_text(size=8, angle=90),
+                  axis.text.x = element_text(size=8),
+                  axis.text.y = element_text(size=8),
+                  panel.grid.major = element_blank(),
+                  panel.background = element_rect(colour = "transparent", fill=NA),
+                  panel.border = element_rect(colour = "black", fill=NA))
+    
+
+    plot3 <- plot_metric(cp)
+    plot3a <- plot3 +
+            theme_bw() +
+            labs(y="Sensitivity + Specificity",title = "Metric values by cutpoint value", subtitle = paste(biome_list[i]," - ",biome_list[j],"\nin-sample results",sep="")) +
+            geom_vline(xintercept = cp$optimal_cutpoint, linetype = 2, size = 0.3, color = "gray48")
+
+    
+    plot5 <- similarity2 %>% 
+            filter(biome%in%c(biome_list[i],biome_list[j])) %>% 
+            ggplot() +
+            geom_vline(xintercept = cp$optimal_cutpoint, linetype = 2, size = 0.3, color = "gray48") +
+            geom_density(aes(x = simil_score, color = biome),size=0.75) +
+            scale_color_manual(values = colores) +
+            annotate(geom = "text", label = paste("Optimal cutpoint: ",round(cp$optimal_cutpoint, 4),sep=""),
+                     x = cp$optimal_cutpoint - 0.018, y =7, size = 3, angle = 90,color="gray48")+
+            theme_bw() +
+            guides(color = FALSE) +
+            labs(x = "Similarity scores", y="Density", subtitle = paste("( )",biome_list[i],"-",biome_list[j],sep=" ")) +
+            theme(plot.title = element_blank(),
+                  plot.subtitle= element_text(size=8, face="bold", color="black"),
+                  #axis.title.x = element_blank(),
+                  axis.title.x = element_text(size=8,color = "black"),
+                  #axis.title.y = element_blank(),
+                  axis.title.y = element_text(size=8, angle=90),
+                  axis.text.x = element_text(size=8),
+                  axis.text.y = element_text(size=8),
+                  panel.grid.major = element_blank(),
+                  panel.background = element_rect(colour = "transparent", fill=NA),
+                  panel.border = element_rect(colour = "black", fill=NA))
+    
+    
+    
+    #ggsave(plot2a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_ROC.png", sep=''),width = 8, height = 8, units = "cm", dpi = 100)
+    #ggsave(plot2a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_ROC.pdf", sep=''),width = 8, height = 8, units = "cm", dpi = 100)
+    
+    
+    #ggsave(plot3a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_METRIC.png", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
+    #ggsave(plot3a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_METRIC.pdf", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
+    
+    
+    
+    #ggsave(plot5, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_OPTIM.png", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
+    #ggsave(plot5, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_OPTIM.pdf", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
+      }
+  }
+```
+
+
+```{r}
+    #plot1 <- plot_x(cp)
+    #plot1a <- plot1 +geom_density(aes(x = simil_score, color = biome),size=0.5) +
+            #scale_color_manual(values = colores) + theme_bw() +
+            #labs(x = "Similarity scores", subtitle =  paste(biom_eval," - ",biome_list[i],"\nOptimal cutpoint and distribution by biome",sep="")) 
+
+   #plot4 <- plot_sensitivity_specificity(cp)
+    #plot4a <- plot4 + coord_fixed()+ theme_bw() + labs(subtitle = paste(biom_eval,"-",biome_list[i],sep=" ")) 
+
+```
+
