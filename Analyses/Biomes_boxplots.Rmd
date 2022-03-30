@@ -5,11 +5,145 @@ date: "17/02/2021"
 output: html_document
 ---
 
+#Importing data
+
+The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
+
+Importing pollen percentages
+*Chunk 2*
+```{r}
+#   Modify path to the data
+polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
+polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
+polen_file <- paste(polen_path, polen_name, sep="")
+polen <- read.csv(polen_file) 
+
+str(polen)
+```
+
+
+
+Importing observed biome by using an particular search window
+*Chunk 3*
+```{r}
+#   Modify path to the data
+pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
+pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
+pnv_file <- paste(pnv_path, pnv_name, sep="")
+pnv_obs <- read.csv(pnv_file) 
+
+pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
+
+str(pnv_obs)
+```
+
+
+#Setting some traits
+*Chunk 4*
+```{r}
+#Set path to output files
+path_to_results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Comparison_matrices_and_metrics/"
+
+#Set prefix name of the iteration
+iteration <- "EC4c_f_ep0.5"
+
+#Set proportion of the data to be used as training dataset (0.75 for a training/testing ratio of 75:25)
+SampFrac <- 0.7
+
+#Set value for epsilon
+EpsVal<- 0.5
+```
+#Filtering the data
+  For each pollen sample, join the percentages of pollen with the observed biome in a search window on the PNV map. Keep only one sample for each pollen sample location by random sampling. Discard samples whose observed biome is *NA*. 
+*Chunk 5*
+```{r}
+polen_wide <- polen %>% 
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0)
+
+polen_wide_o<-pnv_obs %>% 
+  inner_join(polen_wide, by="ID_SAMPLE") #join pollen percentages and observed biome
+
+set.seed(2501)
+ambwide_amg <- polen_wide_o %>%
+  group_by(latitude,longitude) %>% 
+  slice_sample(n=1) %>% #keep only one sample per location
+  ungroup() %>% 
+  subset(!is.na(Dominant)) #Remove samples with NA observed biome
+
+#This is the total number of samples left in each biome
+ambwide_amg %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+```
+
+
+
+Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM by using Themis R package. https://themis.tidymodels.org/
+
+```{r}
+ratio <- ambwide_amg %>% count(Dominant) %>% 
+  mutate(med = median(n)) %>% 
+  pivot_wider(names_from = Dominant, values_from = n) %>% 
+  select(med,GRAM,DESE) %>%
+  #mutate(ratioo = med/COOL) %>% 
+  mutate(ratioo = GRAM/DESE) %>%
+  select(ratioo) %>% as_vector()
+
+#Random downsampling majority classes
+set.seed(2468)
+  recipes::recipe(~., ambwide_amg) %>%
+  themis::step_downsample(Dominant, under_ratio = ratio) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL) -> oversamp
+```
+
+
+Split training and testing data
+```{r}
+train_data <- oversamp %>% 
+  group_by(Dominant) %>% 
+  sample_frac(SampFrac)
+
+train_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+
+test_data <- anti_join(oversamp,train_data)
+
+test_data %>% 
+  ggplot(aes(Dominant)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5)
+```
+
+
+Get the TRAINING data table for the algorithm
+```{r}
+train_data <- train_data %>% 
+   pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") %>% 
+  group_by(Dominant,taxon_name) %>%
+  #filter taxa that only occurs once in each group, since we cannot calculate the standard deviation
+  filter(n()>=2) %>% 
+  ungroup() %>%
+  pivot_wider(names_from = taxon_name, values_from = taxon_percent, values_fill = 0) %>% 
+  pivot_longer(!c(ID_SAMPLE,entity_name,latitude,longitude,
+                  Dominant,Subdominant), 
+               names_to = "taxon_name", values_to = "taxon_percent") #This is the object needed for the box-plots
+```
+
+
+
+
 ```{r}
 train_data %>% 
   subset(train_data$Dominant=="GRAM") -> aux1
 
 train_data %>% 
+  subset(train_data$Dominant=="GRAM") %>% 
   group_by(taxon_name) %>% 
   summarise_at(vars(taxon_percent),              # Specify column
                list(mean = mean)) %>%       # Specify function
@@ -36,15 +170,14 @@ train_data %>%
 
 gram
 
-ggsave("/My Drive/Github_esme/Within_variability_technique/Output/Biomes_boxplots/GRAM_EC4c_SHORT.tiff", plot = last_plot(), width = 6, height = 5, dpi = 600)
-
+#ggsave("/My Drive/Github_esme/Within_variability_technique/Output/Biomes_boxplots/GRAM_EC4c_SHORT.tiff", plot = last_plot(), width = 6, height = 5, dpi = 600)
 ```
 
 
 
 ```{r}
 # folder where you want the graphs to be saved:
-results <- "/My Drive/Github_esme/Within_variability_technique/Output/Biomes_boxplots/"  
+results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Biomes_boxplots/"  
 
 
   # create list of counties in data to loop over 
@@ -83,7 +216,7 @@ results <- "/My Drive/Github_esme/Within_variability_technique/Output/Biomes_box
         panel.border = element_rect(colour = "black", fill=NA))
 
     ggsave(plot, file=paste(results, 
-                           biome_list[i], "_EC4c.tiff", sep=''),scale = 1, dpi = 600)
+                           biome_list[i], "_EC4c.png", sep=''),scale = 1, dpi = 600)
     
     print(plot)
   }
