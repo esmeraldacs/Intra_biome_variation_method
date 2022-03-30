@@ -20,7 +20,7 @@ Importing pollen percentages
 *Chunk 2*
 ```{r}
 #   Modify path to the data
-polen_path <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Input/Modern_fossil_pollen_percentages/"
+polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
 polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
 polen_file <- paste(polen_path, polen_name, sep="")
 polen <- read.csv(polen_file) 
@@ -34,7 +34,7 @@ Importing observed biome by using an particular search window
 *Chunk 3*
 ```{r}
 #   Modify path to the data
-pnv_path <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Input/Extract_PNV_biome/"
+pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
 pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
 pnv_file <- paste(pnv_path, pnv_name, sep="")
 pnv_obs <- read.csv(pnv_file) 
@@ -49,7 +49,7 @@ str(pnv_obs)
 *Chunk 4*
 ```{r}
 #Set path to output files
-path_to_results <- "/Users/Esmesaurio/OneDrive - University of Reading/PhD/PAPER_RESUBMISION_3RD/Main method/Output/Comparison_matrices_and_metrics/"
+path_to_results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Comparison_matrices_and_metrics/"
 
 #Set prefix name of the iteration
 iteration <- "EC4c_f_ep0.5"
@@ -60,7 +60,6 @@ SampFrac <- 0.7
 #Set value for epsilon
 EpsVal<- 0.5
 ```
-
 #Filtering the data
   For each pollen sample, join the percentages of pollen with the observed biome in a search window on the PNV map. Keep only one sample for each pollen sample location by random sampling. Discard samples whose observed biome is *NA*. 
 *Chunk 5*
