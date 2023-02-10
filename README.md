@@ -5,7 +5,7 @@
 #### **Authors**: Esmeralda Cruz-Silva, Sandy P. Harrison, Elena Marinova, I. Colin Prentice
 #### Paper available at: https://onlinelibrary.wiley.com/doi/10.1111/jbi.14448 
 
-***Note:*** The R code was constructed using the version R-4.0.2 (consider this for set.seed)
+***Note to consider:*** The R code was constructed using the version R-4.0.2
 
 ### Data availability
 
