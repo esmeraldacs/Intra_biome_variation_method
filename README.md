@@ -1,5 +1,7 @@
 # Intra_biome_variation_method 
 
+***Important note:***
+
 ## Code for "*A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns"*
 
 #### **Authors**: Esmeralda Cruz-Silva, Sandy P. Harrison, Elena Marinova, I. Colin Prentice
