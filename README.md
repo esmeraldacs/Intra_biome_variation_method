@@ -1,7 +1,7 @@
 # Intra_biome_variation_method 
 
 
-## *A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns"*
+## *A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns*
 #### Paper available at: https://onlinelibrary.wiley.com/doi/10.1111/jbi.14448 
 
 ***Note to consider:*** The R code was constructed using the version R-4.0.2
