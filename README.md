@@ -4,7 +4,7 @@
 ## *A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns*
 #### Paper available at: https://onlinelibrary.wiley.com/doi/10.1111/jbi.14448 
 
-***Note:*** The R code was constructed using the version R-4.0.2, to consider for set.seed()
+***Note:*** The R code was constructed using the version R-4.0.2, consider for set.seed()
 
 ### Data availability
 
