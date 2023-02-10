@@ -1,24 +1,13 @@
 # Intra_biome_variation_method 
 
-***Important note:***
 
-## Code for "*A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns"*
+## *A new method based on surface-sample pollen data for reconstructing palaeovegetation patterns"*
 
 #### **Authors**: Esmeralda Cruz-Silva, Sandy P. Harrison, Elena Marinova, I. Colin Prentice
 
 #### Paper available at: https://onlinelibrary.wiley.com/doi/10.1111/jbi.14448 
 
-### Abstract
-
-**Aim**: Biomisation has been the most widely used technique to reconstruct past regional vegetation patterns because it does not require an extensive modern pollen dataset. However, it has well-known limitations including its dependence on expert judgement for the assignment of pollen taxa to plant functional types (PFTs) and PFTs to biomes. Here we present a new method that combines the strengths of biomisation with those of the alternative dissimilarity-based techniques.
- 
-**Location**: The Eastern Mediterranean-Black Sea Caspian Corridor (EMBSeCBIO) region, 28°-49°N, 20°-62°E.
-
-**Methods**:  Modern pollen samples, assigned to biomes based on potential natural vegetation data, are used to characterize the within-biome means and standard deviations of the abundances of each taxon. These values are used to calculate a dissimilarity index between any pollen sample and every biome, and thus assign the sample to the most likely biome. We calculate a threshold value for each modern biome; fossil samples with scores below the threshold for all modern biomes are thus identified as non-analogue vegetation. We applied the new method to the EMBSeCBIO region to compare its performance with existing reconstructions.
-
-**Results**: The method captured changes in the importance of individual taxa along environmental gradients. The balanced accuracy obtained for the EMBSeCBIO region using the new method was better than obtained using biomisation (77% vs. 65%). When the method was applied to high-resolution fossil records, 70% of the entities showed more temporally stable biome assignments than obtained using biomisation. The technique also identified likely non-analogue assemblages in a synthetic modern dataset and in fossil records.
-
-**Main conclusions**: The new method yields more accurate and stable reconstructions of vegetation than biomisation. It requires an extensive modern pollen dataset, but is conceptually simple, and avoids subjective choices about taxon allocations to PFTs and PFTs to biomes.
+***Note:*** This code was constructed under th R version 4.0.2 (consider this for set.seed)
 
 ### Data availability
 
