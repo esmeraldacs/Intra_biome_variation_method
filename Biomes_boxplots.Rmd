@@ -8,41 +8,19 @@ output: html_document
 #Importing data
 
 The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
-
-Importing pollen percentages
-*Chunk 2*
 ```{r}
-#   Modify path to the data
-polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
-polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
-polen_file <- paste(polen_path, polen_name, sep="")
-polen <- read.csv(polen_file) 
+#Importing pollen percentages
+polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds_June2021.csv") 
 
-str(polen)
-```
-
-
-
-Importing observed biome by using an particular search window
-*Chunk 3*
-```{r}
-#   Modify path to the data
-pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
-pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
-pnv_file <- paste(pnv_path, pnv_name, sep="")
-pnv_obs <- read.csv(pnv_file) 
-
+#Importing observed biome by using an particular search window
+pnv_obs <- read.csv("Inputs/Extract_PNV_biomes/resolution1kmfrom250m_window21km_perside.csv") 
 pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
-
-str(pnv_obs)
 ```
 
 
-#Setting some traits
-*Chunk 4*
 ```{r}
 #Set path to output files
-path_to_results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Comparison_matrices_and_metrics/"
+path_to_results <- "Outputs/Comparison_matrices_and_metrics/"
 
 #Set prefix name of the iteration
 iteration <- "EC4c_f_ep0.5"
@@ -79,14 +57,12 @@ ambwide_amg %>%
 
 
 
-Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM by using Themis R package. https://themis.tidymodels.org/
-
+Downsampling  any majority class towards GRAM
 ```{r}
 ratio <- ambwide_amg %>% count(Dominant) %>% 
   mutate(med = median(n)) %>% 
   pivot_wider(names_from = Dominant, values_from = n) %>% 
   select(med,GRAM,DESE) %>%
-  #mutate(ratioo = med/COOL) %>% 
   mutate(ratioo = GRAM/DESE) %>%
   select(ratioo) %>% as_vector()
 
@@ -101,6 +77,7 @@ set.seed(2468)
 
 Split training and testing data
 ```{r}
+#set.seed(124)
 train_data <- oversamp %>% 
   group_by(Dominant) %>% 
   sample_frac(SampFrac)
@@ -215,8 +192,7 @@ results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_b
         panel.background = element_blank(),
         panel.border = element_rect(colour = "black", fill=NA))
 
-    ggsave(plot, file=paste(results, 
-                           biome_list[i], "_EC4c.png", sep=''),scale = 1, dpi = 600)
+  #  ggsave(plot, file=paste(results,biome_list[i], "_EC4c.png", sep=''),scale = 1, dpi = 600)
     
     print(plot)
   }
