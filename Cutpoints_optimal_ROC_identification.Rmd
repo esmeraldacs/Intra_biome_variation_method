@@ -20,36 +20,19 @@ The necessary data are the pollen percentages of each MODERN pollen sample and t
 Importing pollen percentages
 *Chunk 2*
 ```{r}
-#   Modify path to the data
-polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
-polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
-polen_file <- paste(polen_path, polen_name, sep="")
-polen <- read.csv(polen_file) 
+#Importing pollen percentages
+polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds.csv") 
 
-str(polen)
-```
-
-
-
-Importing observed biome by using an particular search window
-*Chunk 3*
-```{r}
-#   Modify path to the data
-pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
-pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
-pnv_file <- paste(pnv_path, pnv_name, sep="")
-pnv_obs <- read.csv(pnv_file) 
-
+#Importing observed biome by using an particular search window
+pnv_obs <- read.csv("Inputs/Extract_PNV_biomes/resolution1kmfrom250m_window21km_perside.csv") 
 pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
-
-str(pnv_obs)
 ```
 
 #Setting some traits
 *Chunk 4*
 ```{r}
 #Set path to output files
-path_to_results <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Outputs/Cutpoints/"
+path_to_results <- "Outputs/Cutpoints/"
 
 #Set prefix name of the iteration
 iteration <- "EC4c_f_ep0.5"
@@ -82,13 +65,12 @@ ambwide_amg <- polen_wide_o %>%
 
 
 
-Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM by using.
+Downsampling majority class towards GRAM by using.
 ```{r}
 ratio <- ambwide_amg %>% count(Dominant) %>% 
   mutate(med = median(n)) %>% 
   pivot_wider(names_from = Dominant, values_from = n) %>% 
   select(med,GRAM,DESE) %>%
-  #mutate(ratioo = med/COOL) %>% 
   mutate(ratioo = GRAM/DESE) %>%
   select(ratioo) %>% 
   purrr::as_vector()
@@ -104,6 +86,7 @@ set.seed(2468)
 
 Split training and testing data
 ```{r}
+#set.seed(124)
 train_data <- oversamp %>% 
   group_by(Dominant) %>% 
   sample_frac(SampFrac)
@@ -243,13 +226,15 @@ for (i in seq_along(biome_list)) {
 
 umbrales <- Cutpoint_optimo_ROC %>% 
   group_by(biome) %>% 
-  slice_min(`cp$optimal_cutpoint`)
+  slice_min(`cp$optimal_cutpoint`) %>% 
+  rename(threshold = `cp$optimal_cutpoint`) %>% 
+  select(biome,threshold)
 
 
 #File with the cutpoint values for paired comparisons
-write.csv(Cutpoint_optimo_ROC, file = paste0(path_to_results,"Cutpoints_biome_paired_comparison.csv",sep=""), row.names = FALSE)
+#write.csv(Cutpoint_optimo_ROC, file = paste0(path_to_results,"Cutpoints_biome_paired_comparison.csv",sep=""), row.names = FALSE)
 #File with a unique cutpoint per biome
-write.csv(umbrales, file = paste0(path_to_results,"/Cutpoints_optimal_one_per_biome.csv",sep=""), row.names = FALSE)
+write.csv(umbrales, file = paste0(path_to_results,"Cutpoints_optimal_umbrales.csv",sep=""), row.names = FALSE)
 ```
 
 
@@ -325,7 +310,6 @@ for (i in seq_along(biome_list)) {
                   panel.border = element_rect(colour = "black", fill=NA))
     
     
-    
     #ggsave(plot2a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_ROC.png", sep=''),width = 8, height = 8, units = "cm", dpi = 100)
     #ggsave(plot2a, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_ROC.pdf", sep=''),width = 8, height = 8, units = "cm", dpi = 100)
     
@@ -337,7 +321,7 @@ for (i in seq_along(biome_list)) {
     
     #ggsave(plot5, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_OPTIM.png", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
     #ggsave(plot5, file=paste(path_to_results, biome_list[i],"-", biome_list[j], "_OPTIM.pdf", sep=''),width = 8, height = 6, units = "cm", dpi = 100)
-      }
+    }
   }
 ```
 

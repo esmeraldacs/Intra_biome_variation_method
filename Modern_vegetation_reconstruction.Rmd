@@ -17,7 +17,7 @@ library(tidyverse)
 The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
 ```{r}
 #Importing pollen percentages
-polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds_June2021.csv") 
+polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds.csv") 
 
 #Importing observed biome by using an particular search window
 pnv_obs <- read.csv("Inputs/Extract_PNV_biomes/resolution1kmfrom250m_window21km_perside.csv") 

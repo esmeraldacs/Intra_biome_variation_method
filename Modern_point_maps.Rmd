@@ -5,36 +5,25 @@ date: "02/12/2020"
 output: html_document
 ---
 
-#Importing data
-
-The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
-
-Importing pollen percentages
-*Chunk 2*
 ```{r}
-#   Modify path to the data
-polen_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/"
-polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
-polen_file <- paste(polen_path, polen_name, sep="")
-polen <- read.csv(polen_file) 
-
-str(polen)
+library(ggplot2)
+library(tidyverse)
 ```
 
 
+#Importing data
 
-Importing observed biome by using an particular search window
-*Chunk 3*
+The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
+*Chunk 2*
 ```{r}
-#   Modify path to the data
-pnv_path <- "/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Extract_PNV_biomes/"
-pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
-pnv_file <- paste(pnv_path, pnv_name, sep="")
-pnv_obs <- read.csv(pnv_file) 
+#Importing pollen percentages
+polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds.csv") 
 
+#Importing observed biome by using an particular search window
+pnv_obs <- read.csv("Inputs/Extract_PNV_biomes/resolution1kmfrom250m_window21km_perside.csv") 
 pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
 
-str(pnv_obs)
+DowncoreData <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/SampleData_DOWNCORE.csv",header=TRUE,sep=",")
 ```
 
 
@@ -69,13 +58,12 @@ ambwide_amg <- polen_wide_o %>%
 ```
 
 
-Downsampling any majoraty class to have the same size of the medium size class. In this case we downsampled any majority class towards GRAM
+Downsampling majority class towards GRAM
 ```{r}
 ratio <- ambwide_amg %>% count(Dominant) %>% 
   mutate(med = median(n)) %>% 
   pivot_wider(names_from = Dominant, values_from = n) %>% 
   select(med,GRAM,DESE) %>%
-  #mutate(ratioo = med/COOL) %>% 
   mutate(ratioo = GRAM/DESE) %>%
   select(ratioo) %>% as_vector()
 
@@ -88,6 +76,7 @@ set.seed(2468)
 
 
 #Split training data
+#set.seed(124)
 train_data <- oversamp %>% 
   group_by(Dominant) %>% 
   sample_frac(SampFrac)
@@ -121,14 +110,10 @@ train_data <- train_data %>%
 
 ```{r}
 #Keep only the obtained train data
-rm(list = setdiff(ls(),"train_data"))
-
-
-DowncoreData <- read.csv("/Users/esmer/UoR/PhD/Intra_biome_variation_method_paper_code/Intra_biome_variation_method/Inputs/Modern_and_fossil_pollen_percentages/SampleData_DOWNCORE_June2021.csv",header=TRUE,sep=",")
+#rm(list = setdiff(ls(),"train_data"))
 
 #Keep only modern samples
 DowncoreData <- DowncoreData %>% subset(age<=150)
-
 
 #Create a table AllData
 alldata <- full_join(DowncoreData, train_data,by="taxon_name")
@@ -215,6 +200,7 @@ world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
 
 ocean<- raster::shapefile("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/ne_50m_ocean/ne_50m_ocean.shp")
 
+
 elevation<- raster::raster("E:/UoR Biomisation/PAPER_NEW_BIOMISATION_FIGURES/Natural Earth Data/Medium_scale/MSR_50M_manual_elevation/MSR_50M/MSR_50M.tif")
 
 #  Define your own domine:
@@ -256,9 +242,9 @@ plot_b <- ggplot(data = world) +
   #geom_sf(col="black",fill="transparent") + #Using if we want political borders
   coord_sf(ylim = c(28.05317, 49.2431), xlim = c(19.88,62), expand = FALSE) +
   #coord_sf(ylim = c(28.05317,49.2431), xlim = c(19.54792, 63), expand = FALSE)+
-  geom_raster(data=natelevation, aes(y=Latitude, x=Longitude, fill=elevation), show.legend = F)+
-  scale_fill_gradientn(colours = c("#6c8396", "#fcfcfc"))+ #f8f8f8 en lugar de fcfcfc  
-  geom_polygon(data = ocean, aes(x=long, y=lat, group=group), fill= "white")+#E2F1FC '#E2F1FC'
+  #geom_raster(data=natelevation, aes(y=Latitude, x=Longitude, fill=elevation), show.legend = F)+
+ # scale_fill_gradientn(colours = c("#6c8396", "#fcfcfc"))+ #f8f8f8 en lugar de fcfcfc  
+ # geom_polygon(data = ocean, aes(x=long, y=lat, group=group), fill= "white")+#E2F1FC '#E2F1FC'
   geom_point(data = biomes_maps, mapping = aes(x = longitude, y = latitude, colour=predicted_biome, size=predicted_score), alpha=1)+
       scale_size(limits = c(0.925,0.999),range = c(0.0001,2.5),breaks = c(0.94,0.96,0.98)) + #or: c(0.1,5)
       #scale_size(limits = c(min(slig$predicted_score),max(slig$predicted_score)),range = c(1,5),breaks = c(0.1,0.3))+ #or: c(0.1,5)

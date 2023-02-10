@@ -1,0 +1,228 @@
+---
+title: "PROB_DOWNCORE"
+author: "FULL_CODE_NEW"
+date: "02/12/2020"
+output: html_document
+---
+
+
+```{r}
+DowncoreData <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/SampleData_DOWNCORE.csv",header=TRUE,sep=",")
+
+DowncoreData <- DowncoreData %>% subset(age<13200)
+
+BiomeData <- read.csv("Outputs/Train_dataset/Train_dataset.csv",header=TRUE,sep=",")
+
+cutpoints <- read.csv("Outputs/Cutpoints/Cutpoints_optimal_umbrales.csv") %>% select(biome,threshold)
+
+#Create a table AllData
+alldata <- full_join(DowncoreData,BiomeData,by="taxon_name")
+str(alldata)
+```
+
+
+##PREDICTED BIOME
+Prepare the data
+```{r}
+alldata <- alldata %>% 
+  ##Remove taxa that are in the training set, but do not appear in the downcore data of the EMBSECBIO region
+  filter(!is.na(ID_SAMPLE)) %>% 
+  #Remove taxa that are in the testing set, but not in the training set.
+  subset(!is.na(Mean_CENF))
+```
+
+
+###Dissimilarity index
+```{r}
+alldata %>% 
+  mutate(Epsilon=0.5)%>% #Set a value for epsilon
+  mutate(TUND_Sqrt=(taxon_percent-Mean_TUND)^2/((Stdev_TUND+Epsilon)^2)) %>% 
+  mutate(DESE_Sqrt=(taxon_percent-Mean_DESE)^2/((Stdev_DESE+Epsilon)^2)) %>% 
+  mutate(GRAM_Sqrt=(taxon_percent-Mean_GRAM)^2/((Stdev_GRAM+Epsilon)^2)) %>% 
+  mutate(XSHB_Sqrt=(taxon_percent-Mean_XSHB)^2/((Stdev_XSHB+Epsilon)^2)) %>% 
+  mutate(CENF_Sqrt=(taxon_percent-Mean_CENF)^2/((Stdev_CENF+Epsilon)^2)) %>% 
+  mutate(TEDE_Sqrt=(taxon_percent-Mean_TEDE)^2/((Stdev_TEDE+Epsilon)^2)) %>% 
+  mutate(CMIX_Sqrt=(taxon_percent-Mean_CMIX)^2/((Stdev_CMIX+Epsilon)^2)) %>% 
+  mutate(ENWD_Sqrt=(taxon_percent-Mean_ENWD)^2/((Stdev_ENWD+Epsilon)^2)) %>% 
+  mutate(WTSFS_Sqrt=(taxon_percent-Mean_WTSFS)^2/((Stdev_WTSFS+Epsilon)^2)) %>% 
+  dplyr::select(ID_SAMPLE,age,TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt) %>% 
+  group_by(ID_SAMPLE,age) %>% 
+  summarise(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sum))%>% 
+  mutate(across(c(TUND_Sqrt,DESE_Sqrt,GRAM_Sqrt,XSHB_Sqrt,CENF_Sqrt,
+         TEDE_Sqrt,CMIX_Sqrt,ENWD_Sqrt,WTSFS_Sqrt), sqrt)) %>% 
+  ungroup()->sqsc
+```
+
+
+###Get recirpocal of the scores and normalization
+```{r}
+sqsc %>% 
+  mutate(TUND=exp(-TUND_Sqrt/100)) %>% 
+  mutate(DESE=exp(-DESE_Sqrt/100)) %>% 
+  mutate(GRAM=exp(-GRAM_Sqrt/100)) %>% 
+  mutate(XSHB=exp(-XSHB_Sqrt/100)) %>% 
+  mutate(ENWD=exp(-ENWD_Sqrt/100)) %>% 
+  mutate(WTSFS=exp(-WTSFS_Sqrt/100)) %>% 
+  mutate(CENF=exp(-CENF_Sqrt/100)) %>% 
+  mutate(CMIX=exp(-CMIX_Sqrt/100)) %>% 
+  mutate(TEDE=exp(-TEDE_Sqrt/100)) %>%    
+  dplyr::select(ID_SAMPLE,age,TUND,DESE,GRAM,XSHB,ENWD,
+         WTSFS,CENF,CMIX,TEDE)->biomes
+
+#write.csv(biomes,"/Users/Esmesaurio/Desktop/biomaspoportions.csv")
+```
+
+
+```{r}
+meta <- alldata %>% 
+  dplyr::select(entity_name,latitude,longitude,ID_SAMPLE) %>% 
+  distinct()
+
+downcore <- biomes %>% 
+  mutate(predicted_biome=colnames(biomes [,3:11])[apply(biomes [,3:11], 1, which.max)]) %>% 
+  mutate(predicted_score=apply(biomes [,3:11], 1, max)) %>% 
+  dplyr::select(ID_SAMPLE,age,predicted_biome,predicted_score,predicted_score) %>% 
+  inner_join(meta, by="ID_SAMPLE")
+```
+
+```{r}
+
+#cutpoints <- read.csv("/Users/esmer/UoR/PhD/New_veg_recon/Intra-biome_variation_method-master/Output/Comparison_matrices_and_metrics_EC4_E_runA/Cutpoints_optimal/Cutpoints_optimal_umbrales.csv") %>% select(biome,threshold)
+
+analogs <- inner_join(downcore,cutpoints, by=c("predicted_biome"="biome")) %>% 
+  mutate(analog= predicted_score>=threshold)
+
+analogs %>% 
+  filter(analog==FALSE) %>% 
+  ggplot(aes(x=age))+
+  geom_histogram()
+
+analogs %>% 
+  filter(analog==FALSE) %>% 
+  select(entity_name,age) %>% 
+  distinct() %>% 
+  ggplot(aes(x=age)) +
+  geom_histogram()
+```
+
+#Binning the data
+```{r}
+analogs_aux <- analogs %>% 
+    select(entity_name,age,analog) %>% 
+    distinct() %>% 
+    mutate(age= case_when(age<=0 ~ 0,TRUE ~ age))
+
+
+dat_length <- data.frame()
+for (i in seq(200,13200,100)){
+  b <- analogs_aux %>% 
+      filter(age >= (i-200) & age <= i) %>% 
+      mutate(vent = paste("v_",i-200,"_to_",i,sep = "")) %>% 
+      mutate(bin_centre=i-100)
+  
+  dat_length <- rbind(dat_length, b)
+}
+
+
+pueb1 <- dat_length %>% 
+  select(-age) %>% 
+  distinct() %>% 
+  count(bin_centre, analog) %>%
+  group_by(bin_centre) %>%
+  mutate(freq = (n / sum(n)*100))
+  
+
+plot1 <- pueb1 %>% 
+  filter(analog==FALSE) %>% 
+  ggplot(aes(x = bin_centre, y = freq)) +
+  geom_step() +
+  scale_x_continuous(n.breaks = 10) +
+  labs(x="Age (cal. years BP)", y="Proportion of entities (%)") +
+  theme_bw() +
+  theme(panel.background = element_rect(colour = "transparent", fill=NA),
+        panel.grid.major = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size = 0.5),
+        axis.title.x = element_text(size=8,color = "black"),
+        #axis.title.y = element_blank(),
+        axis.title.y = element_text(size=8, angle=90),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8))
+
+
+
+plot1
+
+#ggsave(plot = last_plot() ,file="/Users/esmer/UoR/PhD/PAPER_RESUBMISION_3RD/Paper_figure_test_thresholds_on_past/Proportion_entities.png", height = 5, width = 8, units="cm",dpi=100)
+```
+
+
+
+
+```{r}
+dat_length %>% 
+  distinct() %>% 
+  count(bin_centre, analog) %>%
+  group_by(bin_centre) %>%
+  mutate(freq = (n / sum(n)*100)) %>% 
+  ungroup() %>% 
+  filter(bin_centre <= 4000) %>% 
+  filter(analog == FALSE) %>% 
+  mutate(media = mean(freq)) %>% 
+  mutate(minimo = min(freq)) %>% 
+  mutate(maximo = max(freq))
+```
+
+
+
+
+#Final plot
+```{r}
+analogs_aux <- analogs %>% 
+    select(entity_name,age,analog) %>% 
+    distinct() %>% 
+    mutate(age= case_when(age<=0 ~ 0,TRUE ~ age))
+
+
+dat_length <- data.frame()
+for (i in seq(200,13200,100)){
+  b <- analogs_aux %>% 
+      filter(age >= (i-200) & age <= i) %>% 
+      mutate(vent = paste("v_",i-200,"_to_",i,sep = "")) %>% 
+      mutate(bin_centre=i-100)
+  
+  dat_length <- rbind(dat_length, b)
+}
+
+
+pueb1 <- dat_length %>% 
+  select(-age) %>% 
+  distinct() %>% 
+  count(bin_centre, analog) %>%
+  group_by(bin_centre) %>%
+  mutate(freq = (n / sum(n)*100))
+  
+
+plot1 <- pueb1 %>% 
+  filter(analog==FALSE) %>% 
+  ggplot(aes(x = bin_centre, y = freq)) +
+  geom_step(size = 0.6) +
+  scale_x_continuous(n.breaks = 10) +
+  labs(x="Age (Cal. yr. BP)", y="Proportion of entities (%)") +
+  scale_x_continuous(breaks = seq(0, 13000, by = 1000), expand = c(0.01, 0)) +
+  scale_y_continuous(breaks = seq(0,30, by=5)) +
+  theme_bw() +
+  theme(axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=11),
+        axis.text.x = element_text(size=11, angle = 90,  vjust = 0.5, hjust=1),
+        axis.text.y = element_text(size=11),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+plot1
+```
+
+
+
+
