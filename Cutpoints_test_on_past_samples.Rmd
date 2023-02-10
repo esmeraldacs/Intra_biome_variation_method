@@ -7,12 +7,16 @@ output: html_document
 
 
 ```{r}
+#Import pollen percentages of fossil samples
 DowncoreData <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/SampleData_DOWNCORE.csv",header=TRUE,sep=",")
 
+#Keep only those younger than 13200
 DowncoreData <- DowncoreData %>% subset(age<13200)
 
+#Import training dataset
 BiomeData <- read.csv("Outputs/Train_dataset/Train_dataset.csv",header=TRUE,sep=",")
 
+#Import estimated per-biome thresholds
 cutpoints <- read.csv("Outputs/Cutpoints/Cutpoints_optimal_umbrales.csv") %>% select(biome,threshold)
 
 #Create a table AllData
