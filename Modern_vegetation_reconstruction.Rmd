@@ -15,38 +15,18 @@ library(tidyverse)
 #Importing data
 
 The necessary data are the pollen percentages of each MODERN pollen sample and the biome observed in the search window on the PNV map.
-
-Importing pollen percentages
-*Chunk 2*
 ```{r}
-#   Modify path to the data
-polen_path <- "Inputs/Modern_and_fossil_pollen_percentages/"
-polen_name <- "Modern_pollen_perc_emb_smpds_June2021.csv"
-polen_file <- paste(polen_path, polen_name, sep="")
-polen <- read.csv(polen_file) 
+#Importing pollen percentages
+polen <- read.csv("Inputs/Modern_and_fossil_pollen_percentages/Modern_pollen_perc_emb_smpds_June2021.csv") 
 
-str(polen)
-```
-
-
-
-Importing observed biome by using an particular search window
-*Chunk 3*
-```{r}
-#   Modify path to the data
-pnv_path <- "Inputs/Extract_PNV_biomes/"
-pnv_name <- "resolution1kmfrom250m_window21km_perside.csv"
-pnv_file <- paste(pnv_path, pnv_name, sep="")
-pnv_obs <- read.csv(pnv_file) 
-
+#Importing observed biome by using an particular search window
+pnv_obs <- read.csv("Inputs/Extract_PNV_biomes/resolution1kmfrom250m_window21km_perside.csv") 
 pnv_obs <- pnv_obs %>% select(-c(Dominant_num,Subdominant_num,Third,Third_num))
 
 str(pnv_obs)
 ```
 
 
-#Setting some traits
-*Chunk 4*
 ```{r}
 #Set path to output files
 path_to_results <- "Outputs/Comparison_matrices_and_metrics/"
@@ -106,6 +86,7 @@ set.seed(2468)
 
 Split training and testing data
 ```{r}
+#set.seed(124)
 train_data <- oversamp %>% 
   group_by(Dominant) %>% 
   sample_frac(SampFrac)
@@ -147,7 +128,7 @@ train_data <- train_data %>%
   ungroup() %>% 
   pivot_wider(names_from = Dominant, values_from = c(Mean, Stdev))
 
-#write.csv(train_data,"/My Drive/Github_esme/Within_variability_technique/Input/Training_dataset/BiomeData_EC4c_f.csv",row.names=FALSE)
+write.csv(train_data,"Outputs/Train_dataset/Train_dataset.csv",row.names=FALSE)
 ```
 
 
@@ -290,7 +271,7 @@ zatab
 rzatab<-round(prop.table(zatab,1)*100)
 rzatab
 
-write.csv(zatab, file=paste(path_to_results,iteration, "_Dominant.csv", sep=''))
+#write.csv(zatab, file=paste(path_to_results,iteration, "_Dominant.csv", sep=''))
 ```
 
 
@@ -305,7 +286,7 @@ zatab
 rzatab<-round(prop.table(zatab,1)*100)
 rzatab
 
-write.csv(zatab, file=paste(path_to_results,iteration, "_Composit.csv", sep=''))
+#write.csv(zatab, file=paste(path_to_results,iteration, "_Composit.csv", sep=''))
 ```
 
 
@@ -325,7 +306,7 @@ zatab<-MLmetrics::ConfusionMatrix(y_true=observed,y_pred=predicted)
 rzatab<-round(prop.table(zatab,1)*100)
 #rzatab
 
-write.csv(zatab, file=paste(path_to_results,iteration, "_Subdominant.csv", sep=''))
+#write.csv(zatab, file=paste(path_to_results,iteration, "_Subdominant.csv", sep=''))
 ```
 
 
