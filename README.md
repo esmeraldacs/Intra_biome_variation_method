@@ -7,7 +7,7 @@
 
 #### Paper available at: https://onlinelibrary.wiley.com/doi/10.1111/jbi.14448 
 
-***Note:*** This code was constructed under th R version 4.0.2 (consider this for set.seed)
+**Note:** The R code was constructed using the version R-4.0.2 (consider this for set.seed)
 
 ### Data availability
 
